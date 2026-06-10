@@ -1,6 +1,10 @@
 class KnowledgeBase():
      ## ~~~--------- !! State Labels !! --------~~~ ##
     def __init__(self):
+        ## ~~~--------- !! Goal Definition !! --------~~~ ##
+        self.goal = "Passenger has been dropped at destination."
+        ## ~~~--------- !! Goal Definition !! --------~~~ ##
+                 
         ## Passenger State represented as a list of 5 elements, each element can be 0, 1, 2, 3, or 4
         self.passenger_states = {
             0: 'Red',
@@ -38,7 +42,7 @@ class KnowledgeBase():
         }
      ## ~~~--------- !! State Labels !! --------~~~ ##
 
-     ## ~~~--------- !! Domain Rules !! --------~~~ ##
+     ## ~~~--------- !! Domain Rules (Valid) !! --------~~~ ##
 
     def is_valid_pickup(self, taxi_position, passenger_position):
         return taxi_position == passenger_position 
@@ -49,9 +53,16 @@ class KnowledgeBase():
     def is_at_goal_state(self, passenger_state, destination_state):
         return passenger_state == destination_state 
     
-     ## ~~~--------- !! Domain Rules !! --------~~~ ##
+     ## ~~~--------- !! Domain Rules (Valid) !! --------~~~ ##
 
+     ## ~~~--------- !! Domain Rules (Invalid) !! --------~~~ ##
 
-        
-        
+    def is_invalid_pickup(self, taxi_position, passenger_position):
+        return taxi_position != passenger_position
+
+    def is_invalid_dropoff(self, taxi_position, passenger_state, destination_state):
+        return passenger_state != "In taxi" or taxi_position != destination_state
+    
+     ## ~~~--------- !! Domain Rules (Invalid) !! --------~~~ ##
+
 
