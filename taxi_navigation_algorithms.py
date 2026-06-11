@@ -5,13 +5,17 @@ class TaxiNavigation:
     def __init__(self):
      ## ~~~--------- !! Environmental Interface Definition !! --------~~~ ##
 
-        ## Creates the Taxi-v3 environment from Python package "gymnasium"
-        self.gym_environment = gym.make("Taxi-v3", render_mode="human")
+        ## Creates the Taxi-v4 environment from Python package "gymnasium"
+        self.gym_environment = gym.make("Taxi-v4", render_mode="ansi")
     
     ## Resets the environment to the initial state and returns the initial observation
     def reset_environment(self):
         initial_state, info = self.gym_environment.reset()
         return initial_state
+    
+    ## Renders the current state of the environment and returns it as a string (since render_mode is set to "ansi")
+    def render_environment(self):
+        return self.gym_environment.render()
     
     ## Executes the given action in the environment aka stepping in a direction and returns the new observation
     def execute_action(self, action):
@@ -113,7 +117,9 @@ class TaxiNavigation:
     
     def execute_path(self, path, kb):
         state = self.reset_environment()
-        total_reward = 0.0 
+        total_reward = 0.0
+        print("\nInitial Environmental State:")
+        print(self.render_environment())  ## Print the initial state of the environment before executing the path
         print("\n" + "="*50)
         print("EXECUTING PATH AND CALCULATING REWARDS:")
         print("="*50)  
