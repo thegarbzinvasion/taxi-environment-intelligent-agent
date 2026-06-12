@@ -2,33 +2,29 @@ import gymnasium as gym ## <-- To use to Taxi-v4 environment
 from typing import Any, cast
 import heapq ## <-- To use a priority queue for A* Search
 from collections import deque ## <-- To use a queue for BFS
+import time
 class TaxiNavigation:
     def __init__(self):
-     ## ~~~--------- !! Environmental Interface Definition !! --------~~~ ##
-
-        ## Creates the Taxi-v4 environment from Python package "gymnasium"
+        ## ~~~--------- !! Environmental Interface Definition !! --------~~~ ##
         self.gym_environment = gym.make("Taxi-v4", render_mode="ansi")
-        self.P = cast(Any, self.gym_environment.unwrapped).P ## Accessing the transition probabilities and rewards from the environment's unwrapped version
-    
-    ## Resets the environment to the initial state and returns the initial observation
+        self.P = cast(Any, self.gym_environment.unwrapped).P 
+        self.initial_state = None  
+        ## ~~~--------- !! Environmental Interface Definition !! --------~~~ ##
+
     def reset_environment(self):
+        ## Reset environment once per run to preserve the map layout state across search and execution
         initial_state, info = self.gym_environment.reset()
+        self.initial_state = initial_state  
         return initial_state
     
-    ## Renders the current state of the environment and returns it as a string (since render_mode is set to "ansi")
     def render_environment(self):
         return self.gym_environment.render()
     
-    ## Executes the given action in the environment aka stepping in a direction and returns the new observation
     def execute_action(self, action):
         return self.gym_environment.step(action)
     
-    ## ~~~-------- !! Environmental Interface Definition !! --------~~~ ##
-    
-    ## ~~~-------- !! Helper method to decode the state of Taxi-v3 using KnowledgeBase !! --------~~~ ##
-
     def decode_state(self, state):
-        ## Decodes the Taxi-v3 state integer into taxi_row, taxi_col, passenger_location, destination
+        ## Decodes the discrete single state integer back into its 4 layout variables
         destination = state % 4
         state //= 4
         passenger_location = state % 5
@@ -37,128 +33,177 @@ class TaxiNavigation:
         state //= 5
         taxi_row = state    
         return taxi_row, taxi_col, passenger_location, destination
-    
-     ## ~~~-------- !! Helper method to decode the state of Taxi-v3 using KnowledgeBase !! --------~~~ ##
 
-     ## ~~~--------- !! Search Algorithm #1 (BFS) !! --------~~~ ##
+    ## ~~~--------- !! Search Algorithm #1 (BFS) !! --------~~~ ##
 
-    def bfs_search(self, kb):
-        start_state = self.reset_environment() ## Define the start_state by calling reset_environment() method of TaxiNavigation
+    def bfs_search(self, start_state, kb):
         queue = deque()
-        queue.append((start_state, []))  ## (current_state, path_to_current_state)
-        visited = set()  ## To keep track of visited states
+        queue.append((start_state, []))  
+        visited = set([start_state])  
+        ## --- METRICS COLLECTORS ---
+        nodes_explored = 0
+        max_frontier_size = 1
+        start_time = time.perf_counter()
         while queue:
-            state, path = queue.popleft()  ## Get the next state and path (left node first in regards to a tree)
-            if state in visited:
-                continue  ## Skip if the state has already been visited
-            visited.add(state)  ## Mark the state as visited
-            taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)  ## Decode the state using the helper method
-            passenger_state = kb.passenger_states[passenger_location]  ## Get the passenger state from the knowledge base
-            destination_state = kb.drop_off_locations[destination]  ## Get the destination state from the knowledge base
-            if kb.is_at_goal_state(passenger_state, destination_state):  ## Check if the current state is the goal state using the knowledge base
-                return path  ## Return the path to the goal state if found    
-            for action in range(6):  ## Loop through all possible actions (0 to 5)
-                transitions = self.P[state][action]  ## Get the possible transitions for the current state and action
-                for prob, next_state, reward, done in transitions:  ## Loop through the possible transitions
+            ## Track maximum size the queue reached (Space Complexity proxy)
+            max_frontier_size = max(max_frontier_size, len(queue))
+            state, path = queue.popleft()  
+            nodes_explored += 1 ## Track popped nodes (Time Complexity proxy)
+            taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)
+            for action in range(6):  
+                ## Logic Filter: Prune obviously impossible pickups/dropoffs to avoid sync errors
+                if action == 4 and passenger_location == 4:  
+                    continue
+                if action == 5 and passenger_location != 4:  
+                    continue
+                for prob, next_state, reward, done in self.P[state][action]:
+                    if reward == -10:
+                        continue
                     if next_state in visited:
                         continue
-                    new_path = path.copy()  ## Create a copy of the current path
-                    new_path.append(action)  ## Add the current action to the new path
-
-                    if done:
-                        return new_path  ## If the action leads to a terminal state, return the path immediately
-                    queue.append((next_state, new_path))  ## Add the new state and path 
-        return None  ## Return None if no solution is found after exploring all states
-
-     ## ~~~--------- !! Search Algorithm #1 (BFS) !! --------~~~ ##
+                    new_path = path + [action]  
+                    ## Goal verification: explicitly checking for the terminal +20 success reward flag
+                    if done and reward == 20:
+                        metrics = {
+                            "time_complexity_nodes": nodes_explored,
+                            "space_complexity_nodes": max_frontier_size,
+                            "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+                            "completeness": "Yes (BFS is complete for finite state spaces)",
+                            "optimality": "Yes (BFS guarantees fewest actions/shallowest path)"
+                        }
+                        return new_path, metrics  
+                    queue.append((next_state, new_path))  
+                    visited.add(next_state)  
+        metrics = {
+            "time_complexity_nodes": nodes_explored,
+            "space_complexity_nodes": max_frontier_size,
+            "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+            "completeness": "Yes",
+            "optimality": "N/A (No path found)"
+        }
+        return None, metrics  
+    
+    ## ~~~--------- !! Search Algorithm #1 (BFS) !! --------~~~ ##
 
     def heuristic(self, state, kb):
-        taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)  ## Decode the state using the helper method
-        passenger_state = kb.passenger_states[passenger_location]  ## Get the passenger state from the knowledge base
-        destination_state = kb.drop_off_locations[destination]  ## Get the destination state from the knowledge base
+        taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)  
+        passenger_state = kb.passenger_states[passenger_location]  
+        destination_state = kb.drop_off_locations[destination]  
         coordinates = {
             'Red': (0, 0),
             'Green': (0, 4),
             'Yellow': (4, 0),
             'Blue': (4, 3),
         }
+        ## If passenger is inside the cab, track Manhattan distance straight to destination
         if passenger_state == "In taxi":
             destination_coordinate = coordinates[destination_state]
-            return abs(taxi_row - destination_coordinate[0]) + abs(taxi_col - destination_coordinate[1])  ## Manhattan distance to the destination
-        else:
-            # If the passenger is not in the taxi, calculate the distance to the passenger's location to pick them up first
-            passenger_coordinate = coordinates[passenger_state]
-            destination_coordinate = coordinates[destination_state]
-            to_passenger = abs(taxi_row - passenger_coordinate[0]) + abs(taxi_col - passenger_coordinate[1])  ## Manhattan distance to the passenger
-            from_passenger_to_destination = abs(passenger_coordinate[0] - destination_coordinate[0]) + abs(passenger_coordinate[1] - destination_coordinate[1])  ## Manhattan distance from the passenger to the destination
-            return to_passenger + from_passenger_to_destination  ## Total heuristic is the distance to the passenger plus the distance from the passenger to the destination
+            return abs(taxi_row - destination_coordinate[0]) + abs(taxi_col - destination_coordinate[1])  
+        ## If passenger is waiting, add distance to passenger + distance from passenger to destination
+        p = coordinates[passenger_state]
+        d = coordinates[destination_state]
+        return (
+            abs(taxi_row - p[0]) + abs(taxi_col - p[1]) +  
+            abs(p[0] - d[0]) + abs(p[1] - d[1])  
+        )
         
-     ## ~~~--------- !! Search Algorithm #2 (A* search) !! --------~~~ ##
+    ## ~~~--------- !! Search Algorithm #2 (A* search) !! --------~~~ ##
 
-    def a_star_search(self, kb):
-        start_state = self.reset_environment() ## Define the start_state by calling reset_environment() method of TaxiNavigation
-        priority_queue = []  ## To keep track of states to explore based on their f(n) value **(f(n) = g(n) + h(n))**
-        start_h = self.heuristic(start_state, kb)  ## Calculate the heuristic value for the start state
-        heapq.heappush(priority_queue, (start_h, 0, start_state, []))  ## (f(n), g(n), current_state, path_to_current_state) **(f(n) = g(n) + h(n))**
-        visited = set()  ## To keep track of visited states
+    def a_star_search(self, start_state, kb):
+        priority_queue = []  
+        start_h = self.heuristic(start_state, kb)  
+        heapq.heappush(priority_queue, (start_h, 0, start_state, [])) 
+        ## Map to track the lowest step-cost (g) spent to discover any given state
+        best_g = {start_state: 0} 
+        ## --- METRICS COLLECTORS ---
+        nodes_explored = 0
+        max_frontier_size = 1
+        start_time = time.perf_counter()
         while priority_queue:
-            f, g, state, path = heapq.heappop(priority_queue)  ## Get the state with the lowest f(n) value **(f(n) = g(n) + h(n))**
-            if state in visited:
-                continue  ## Skip if the state has already been visited
-            visited.add(state)  ## Mark the state as visited
-            taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)  ## Decode the state using the helper method
-            passenger_state = kb.passenger_states[passenger_location]  ## Get the passenger state from the knowledge base
-            destination_state = kb.drop_off_locations[destination]  ## Get the destination state from the knowledge base
-            if kb.is_at_goal_state(passenger_state, destination_state):  ## Check if the current state is the goal state using the knowledge base
-                return path  ## Return the path to the goal state if found    
-            for action in range(6):  ## Loop through all possible actions (0 to 5)
-                for prob, next_state, reward, done in self.P[state][action]:  ## Loop through the possible transitions for the current state and action
-                    if next_state in visited:
+            max_frontier_size = max(max_frontier_size, len(priority_queue))
+            f, g, state, path = heapq.heappop(priority_queue)  
+            nodes_explored += 1
+            ## Graph Search Check: Skip processing if a faster path to this state was popped first
+            if g > best_g.get(state, float('inf')):
+                continue
+            taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)
+            for action in range(6):  
+                if action == 4 and passenger_location == 4:  
+                    continue
+                if action == 5 and passenger_location != 4:  
+                    continue
+                for prob, next_state, reward, done in self.P[state][action]:  
+                    if reward == -10:
                         continue
-                    new_path = path.copy()  ## Create a copy of the current path
-                    new_path.append(action)  ## Add the current action to the new path
-                    if done:
-                        return new_path  ## If the action leads to a terminal state, return the path immediately
-                    g_n = g + 1  ## Increment g(n) by 1 for the new path (assuming each action has a cost of 1)
-                    h_n = self.heuristic(next_state, kb)  ## Calculate h(n) using the heuristic function defined above
-                    f_n = g_n + h_n  ## Calculate f(n) as g(n) + h(n)
-                    heapq.heappush(priority_queue, (f_n, g_n, next_state, new_path))  ## Add the new state and path to the priority queue with its f(n) value
-        return None  ## Return None if no solution is found after exploring all states
+                    g_n = g + 1  
+                    ## Optimization: Check cost at state discovery time to prevent heap bloat
+                    if g_n < best_g.get(next_state, float('inf')):
+                        best_g[next_state] = g_n
+                        new_path = path + [action]
+                        if done and reward == 20:
+                            metrics = {
+                                "time_complexity_nodes": nodes_explored,
+                                "space_complexity_nodes": max_frontier_size,
+                                "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+                                "completeness": "Yes",
+                                "optimality": "Yes (Admissible Manhattan heuristic guarantees path cost optimality)"
+                            }
+                            return new_path, metrics
+                        h_n = self.heuristic(next_state, kb)  
+                        f_n = g_n + h_n  
+                        heapq.heappush(priority_queue, (f_n, g_n, next_state, new_path))  
+                        
+        metrics = {
+            "time_complexity_nodes": nodes_explored,
+            "space_complexity_nodes": max_frontier_size,
+            "execution_time_ms": (time.perf_counter() - start_time) * 1000,
+            "completeness": "Yes",
+            "optimality": "N/A (No path found)"
+        }
+        return None, metrics  
     
-     ## ~~~--------- !! Search Algorithm #2 (A* search) !! --------~~~ ##
+    ## ~~~--------- !! Search Algorithm #2 (A* search) !! --------~~~ ##
 
-     ## ~~~--------- !! Execute Path and Calculate Rewards !! --------~~~ ##
+    ## ~~~--------- !! Execute Path and Calculate Rewards !! --------~~~ ##
     
-    def execute_path(self, path, kb):
-        state = self.reset_environment()
+    def execute_path(self, path, kb, metrics=None):
         total_reward = 0.0
-        print("\nInitial Environmental State:")
-        print("\n")
-        print(self.render_environment())  ## Print the initial state of the environment before executing the path
-        print("EXECUTING PATH AND CALCULATING REWARDS...")
+        print("\nInitial State:")
+        print(self.render_environment())  
+        print("\n==============================")
+        print("EXECUTION")
+        print("==============================")
         done = False
         for i, action in enumerate(path):
-            next_state, reward, done, _, _ = self.execute_action(action)
-            total_reward += float(reward) 
-            ## Print the action taken, reward received, and total reward accumulated so far
-            action_name = kb.available_actions[action]
-            state = next_state 
-            ## After executing each action, check if the environment has reached a terminal state (done == True) and print a message if it has
+            state, reward, done, _, _ = self.execute_action(action)
+            total_reward += float(reward)
+            print(
+                f"Step {i+1}: {kb.available_actions[action]} "
+                f"| Reward: {reward} | Total: {total_reward}"
+            )
             if done:
-                print("\nReached a terminal state.")
+                print("\nTerminal state reached.")
                 break
-         ## After executing the entire path, check if the goal state is achieved and print the final results
-        taxi_row, taxi_col, passenger_location, destination = self.decode_state(state)
-        passenger_state = kb.passenger_states[passenger_location]
-        destination_state = kb.drop_off_locations[destination]
-        ## Check if the goal state is achieved using the knowledge base and print the final results
-        if done:
-            print(f"\n{kb.goal}")
+        ## Outcome evaluation and post-execution visual environment renders
+        if done and total_reward > 0: 
+            print("\nSUCCESS: Passenger delivered!")
+            print("\nFinal Environment State:")
+            print(self.render_environment()) 
         else:
-            print(f"\nGoal not achieved")
-        print("-"*50)
-        print(f"\nTotal Reward: {total_reward}")
-        print("-"*50)
+            print("\nFAILED: Did not reach goal.")
+            print("\nFinal Environment State:")
+            print(self.render_environment())
+        print(f"\nFinal reward: {total_reward}")
+        if metrics:
+            print("\n==============================================")
+            print("         ALGORITHM PERFORMANCE METRICS        ")
+            print("==============================================")
+            print(f" * Completeness:      {metrics['completeness']}")
+            print(f" * Cost Optimality:   {metrics['optimality']}")
+            print(f" * Time Complexity:   {metrics['time_complexity_nodes']} nodes popped from frontier")
+            print(f" * Space Complexity:  {metrics['space_complexity_nodes']} maximum nodes held in frontier concurrently")
+            print(f" * Search Computation: {metrics['execution_time_ms']:.2f} ms")
+            print("==============================================\n")
         return total_reward
 
-     ## ~~~--------- !! Execute Path and Calculate Rewards !! --------~~~ ##
+    ## ~~~--------- !! Execute Path and Calculate Rewards !! --------~~~ ##
