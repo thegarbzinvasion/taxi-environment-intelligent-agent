@@ -42,27 +42,5 @@ class KnowledgeBase():
         }
      ## ~~~--------- !! State Labels !! --------~~~ ##
 
-     ## ~~~--------- !! Domain Rules (Valid) !! --------~~~ ##
-
-    def is_valid_pickup(self, taxi_position, passenger_position):
-        return taxi_position == passenger_position 
-    
-    def is_valid_dropoff(self, taxi_position, passenger_state, destination_state):
-        return passenger_state == "In taxi" and taxi_position == destination_state
-    
-    def is_at_goal_state(self, passenger_state, destination_state):
-        return passenger_state == destination_state 
-    
-     ## ~~~--------- !! Domain Rules (Valid) !! --------~~~ ##
-
-     ## ~~~--------- !! Domain Rules (Invalid) !! --------~~~ ##
-
-    def is_invalid_pickup(self, taxi_position, passenger_position):
-        return taxi_position != passenger_position
-
-    def is_invalid_dropoff(self, taxi_position, passenger_state, destination_state):
-        return passenger_state != "In taxi" or taxi_position != destination_state
-    
-     ## ~~~--------- !! Domain Rules (Invalid) !! --------~~~ ##
 
 
